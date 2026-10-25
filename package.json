@@ -1,0 +1,46 @@
+{
+  "name": "campus-fellow",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/src/index.ts",
+    "dev:client": "vite --config client/vite.config.ts",
+    "build": "vue-tsc --noEmit -p client/tsconfig.json && vite build --config client/vite.config.ts && tsc -p server/tsconfig.json",
+    "start": "node server/dist/index.js",
+    "typecheck": "vue-tsc --noEmit -p client/tsconfig.json && tsc --noEmit -p server/tsconfig.json",
+    "seed": "tsx server/src/seed.ts",
+    "smoke": "node server/scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-vue-next": "^0.548.0",
+    "multer": "^2.0.2",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.3",
+    "ws": "^8.18.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.9.1",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.11",
+    "vue-tsc": "^3.1.1"
+  }
+}

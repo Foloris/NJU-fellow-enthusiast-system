@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 680">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8d4ce"/>
+      <stop offset=".65" stop-color="#edf0d6"/>
+      <stop offset="1" stop-color="#e9ce9e"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="680" fill="url(#bg)"/>
+  <circle cx="745" cy="110" r="66" fill="#fff0bd" opacity=".72"/>
+  <path d="M0 341 Q170 287 328 329 T643 310T900 337V680H0Z" fill="#9abf9d"/>
+  <path d="M0 460 Q210 402 420 447T900 410V680H0Z" fill="#e2c18e"/>
+  <path d="M204 275h492v273H204z" fill="#f3ebd9"/>
+  <path d="M174 277l276-156 276 156z" fill="#507264"/>
+  <path d="M242 296h416v24H242z" fill="#34584b"/>
+  <rect x="255" y="321" width="24" height="227" fill="#dfceb2"/>
+  <rect x="621" y="321" width="24" height="227" fill="#dfceb2"/>
+  <g>
+    <rect x="328" y="280" width="167" height="59" rx="6" fill="#e98b54"/>
+    <text x="411" y="319" text-anchor="middle" font-family="sans-serif" font-size="24" font-weight="700" fill="#fffdf5">社团开放日</text>
+  </g>
+  <g>
+    <circle cx="350" cy="462" r="24" fill="#ecb68e"/>
+    <path d="M312 580c2-65 13-94 38-94s35 31 38 94z" fill="#d15f4a"/>
+    <circle cx="448" cy="449" r="25" fill="#d9a880"/>
+    <path d="M407 580c1-76 15-106 41-106 27 0 40 31 41 106z" fill="#4b7682"/>
+    <circle cx="545" cy="466" r="23" fill="#edbd93"/>
+    <path d="M506 580c2-63 15-93 39-93 25 0 38 30 40 93z" fill="#d9a044"/>
+  </g>
+  <g fill="#466958">
+    <circle cx="803" cy="443" r="93"/>
+    <circle cx="763" cy="442" r="56" fill="#608675"/>
+    <circle cx="841" cy="425" r="63" fill="#527965"/>
+  </g>
+  <g fill="#f0c96c">
+    <circle cx="68" cy="496" r="18"/>
+    <circle cx="105" cy="475" r="18"/>
+    <circle cx="122" cy="512" r="18"/>
+    <circle cx="87" cy="523" r="18"/>
+  </g>
+  <path d="M0 602h900" stroke="#d0ac75" stroke-width="2" stroke-dasharray="18 16"/>
+</svg>
+
