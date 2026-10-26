@@ -9,13 +9,19 @@ const route = useRoute();
 const router = useRouter();
 const tab = ref(route.query.tab === "register" ? "register" : "login");
 const submitting = ref(false);
+const confirmPasswordInput = ref<HTMLInputElement | null>(null);
 const form = reactive({
   username: "",
   password: "",
+  confirmPassword: "",
   nickname: "",
 });
 const title = computed(() =>
   tab.value === "login" ? "欢迎回来，继续遇见同好" : "从一个校园身份开始",
+);
+const passwordMismatch = computed(
+  () => tab.value === "register" && form.confirmPassword.length > 0 &&
+    form.password !== form.confirmPassword,
 );
 
 watch(
@@ -26,11 +32,18 @@ watch(
 );
 
 function switchTab(value: string) {
+  form.confirmPassword = "";
   tab.value = value;
   router.replace({ query: { ...route.query, tab: value } });
 }
 
 async function submit() {
+  if (submitting.value) return;
+  if (tab.value === "register" && form.password !== form.confirmPassword) {
+    notify("两次输入的密码不一致，请重新确认", "error");
+    confirmPasswordInput.value?.focus();
+    return;
+  }
   submitting.value = true;
   try {
     if (tab.value === "login") {
@@ -40,9 +53,11 @@ async function submit() {
       await auth.register(form.username, form.password, form.nickname);
       notify("账号创建成功，欢迎加入");
     }
-    const redirect =
-      typeof route.query.redirect === "string" ? route.query.redirect : "/";
-    router.push(redirect);
+    const requestedRedirect = route.query.redirect;
+    const redirect = typeof requestedRedirect === "string" &&
+      requestedRedirect.startsWith("/") && !requestedRedirect.startsWith("//") &&
+      router.resolve(requestedRedirect).name !== "login" ? requestedRedirect : "/";
+    await router.replace(redirect);
   } catch (error) {
     notify(error instanceof Error ? error.message : "操作失败", "error");
   } finally {
@@ -106,6 +121,24 @@ async function submit() {
               placeholder="至少 8 位"
             />
           </label>
+          <label v-if="tab === 'register'">
+            <span>确认密码</span>
+            <input
+              ref="confirmPasswordInput"
+              v-model="form.confirmPassword"
+              type="password"
+              minlength="8"
+              maxlength="72"
+              required
+              autocomplete="new-password"
+              placeholder="请再次输入密码"
+              :aria-invalid="passwordMismatch ? 'true' : undefined"
+              :aria-describedby="passwordMismatch ? 'confirm-password-error' : undefined"
+            />
+            <small v-if="passwordMismatch" id="confirm-password-error" class="password-error" role="alert">
+              两次输入的密码不一致
+            </small>
+          </label>
           <button class="button auth-submit" :disabled="submitting">
             {{ submitting ? "请稍候…" : tab === "login" ? "登录" : "创建账号" }}
             <ArrowRight :size="18" />
@@ -118,4 +151,10 @@ async function submit() {
     </section>
   </div>
 </template>
+
+<style scoped>
+.password-error {
+  color: #b42318;
+}
+</style>
 

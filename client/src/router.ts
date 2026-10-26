@@ -88,7 +88,8 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   await auth.loadMe();
-  if (to.meta.requiresAuth && !auth.state.user) {
+  // Every application page requires a session; only login/registration is public.
+  if (!to.meta.guestOnly && !auth.state.user) {
     return { name: "login", query: { redirect: to.fullPath } };
   }
   if (to.meta.requiresAdmin && !auth.isAdmin.value) {
