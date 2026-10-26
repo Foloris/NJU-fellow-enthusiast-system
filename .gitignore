@@ -4,5 +4,7 @@ dist/
 .env
 server/data/
 server/uploads/
+server/bin/
+.idea/
 .DS_Store
 

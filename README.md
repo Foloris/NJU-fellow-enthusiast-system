@@ -1,93 +1,105 @@
 # 搭个伴 · 校园同好社区
 
-一个可直接运行的校园交流与找搭子平台。用户可以分享校园见闻、发布搭子邀请、提交申请，并在申请通过后通过实时私信继续联系；管理员可以发布校园新闻、审核举报、下架内容和管理账号。
+Vue 3 + TypeScript 前端、Go 后端、MySQL 数据库。支持同好分享、校园新闻、搭子申请、审批后实时私信、举报及管理员审核，沿用原有页面设计和业务流程。
 
-## 功能
+网页需要登录后访问；未登录打开首页或业务链接会先进入登录/注册页。注册需要确认密码，成功后自动登录并进入原目标页面。
 
-- 账号注册、登录、退出与个人资料编辑
-- 同好分享和校园新闻的发布、搜索、编辑、删除
-- 分享帖评论、点赞、收藏
-- 搭子邀请发布、搜索、编辑、删除
-- 搭子申请与同意/拒绝流程
-- 只有申请通过后才会建立的一对一实时私信
-- 消息历史、未读数量和已读状态
-- 举报分享帖、搭子帖、私信或用户
-- 管理员举报审核、内容下架/恢复/删除、账号封禁
-- 响应式桌面端和移动端界面
-- SQLite 自动建表与演示数据
+## 环境
 
-## 技术栈
+- Go 1.24 或更新版本
+- Node.js 22.13 或更新版本，仅用于前端工具链
+- MySQL 8.0 或更新版本，使用 InnoDB、utf8mb4
 
-- 前端：Vue 3、TypeScript、Vite、Vue Router
-- 后端：Node.js、Express 5、WebSocket
-- 数据库：Node.js 内置 SQLite（`node:sqlite`）
-- 认证：HttpOnly Cookie + JWT
+## 配置和启动
 
-需要 Node.js 22.13 或更新版本。当前使用 Node.js 内置 SQLite，启动时出现一次 `ExperimentalWarning` 属于正常提示。
+先在 MySQL 中创建独立数据库，例如：
 
-## 本地运行
+```sql
+CREATE DATABASE bigshot CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+```
+
+复制根目录 `.env.example` 为 `.env`，填写 `DB_*`、至少32字节的随机 `JWT_SECRET`、8～72字节的 `ADMIN_PASSWORD`。不要提交真实密码。
 
 ```powershell
-npm install
+npm ci
+go mod download
 npm run dev
 ```
 
-打开 `http://localhost:5173`。Vite 会将 API 和 WebSocket 请求代理到 `http://localhost:3001`。
+访问 http://localhost:5173 。Vite 将 `/api`、`/uploads`、`/ws` 代理至3001端口的 Go 服务。
 
-也可以构建后以单端口运行：
+首次启动自动执行版本化 SQL 迁移并初始化管理员。`SEED_DEMO=true` 时，在只有管理员的空库中插入演示数据；重复启动不覆盖管理员密码、不重复写入演示数据。
+
+| 变量 | 默认值 / 要求 |
+| --- | --- |
+| `PORT` | `3001` |
+| `APP_ENV` | `development`；生产设置为 `production`，启用 Secure Cookie |
+| `DB_HOST` / `DB_PORT` | `127.0.0.1` / `3306` |
+| `DB_NAME` | `campus_fellow`，需提前创建 |
+| `DB_USER` / `DB_PASSWORD` | 数据库账号及密码，需要指定库内建表和读写权限 |
+| `JWT_SECRET` | 必填，至少32字节随机值，拒绝示例占位值 |
+| `ADMIN_USERNAME` | `admin`，仅用于首次创建 |
+| `ADMIN_PASSWORD` | 必填，8～72字节，仅用于首次创建 |
+| `SEED_DEMO` | 默认 `false`，示例为 `true`；生产必须 `false` |
+| `UPLOAD_DIR` | `server/uploads` |
+| `CLIENT_DIST_DIR` | `client/dist` |
+
+命令默认在项目根目录运行。进程环境变量优先于 `.env`。配置文件支持 `KEY=value`、整行注释、单/双引号包围的字面值，不执行变量替换。
+
+## 构建与部署
 
 ```powershell
 npm run build
-npm start
+.\server\bin\server.exe
 ```
 
-打开 `http://localhost:3001`。
+Linux/macOS 执行 `./server/bin/server`。二进制同时提供前端静态文件、API、上传文件和 WebSocket，运行时无需 Node.js。`npm start` 使用 `go run`，适合已安装 Go 的环境。从其它目录启动时通过 `-root` 指定项目根目录。
 
-## 演示账号
+仅执行数据库迁移：
 
-| 角色 | 账号 | 密码 |
-| --- | --- | --- |
-| 普通用户 | `linzhi` | `Demo123!` |
-| 普通用户 | `zhouyu` | `Demo123!` |
-| 普通用户 | `chenmu` | `Demo123!` |
-| 管理员 | `admin` | `CampusAdmin123!` |
+```powershell
+go run ./server/cmd/server -migrate-only
+```
 
-管理员账号由首次启动时自动创建。正式部署前，请复制 `.env.example` 为 `.env`，修改 `JWT_SECRET`、`ADMIN_USERNAME` 和 `ADMIN_PASSWORD`，并删除已有的 `server/data/campus.db` 后重新启动，让新配置生效。
+生产环境配置 HTTPS 反向代理，转发 WebSocket Upgrade，持久化上传目录并同时备份 MySQL 和图片。数据库连接使用 UTC，接口时间采用 RFC3339。终止服务时关闭实时连接并等待 HTTP 请求完成。
 
-## 环境变量
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `PORT` | `3001` | 后端监听端口 |
-| `JWT_SECRET` | 本地开发密钥 | 生产环境必须替换 |
-| `ADMIN_USERNAME` | `admin` | 首次创建的管理员账号 |
-| `ADMIN_PASSWORD` | `CampusAdmin123!` | 首次创建的管理员密码 |
-| `SEED_DEMO` | `true` | 是否写入演示用户和内容 |
+已有管理员不会因修改 `.env` 自动改密。不要删除数据库来修改密码或升级结构。历史 SQLite 数据不自动导入；如果需要保留，先备份并另行安排数据迁移。
 
 ## 验证
 
-先启动服务，再运行完整 API 冒烟测试：
-
 ```powershell
-npm start
+npm run typecheck
+go test ./server/...
+go vet ./server/...
+npm run build
 npm run smoke
 ```
 
-测试覆盖注册登录、内容创建、点赞、收藏、评论、申请审批、WebSocket 实时消息、举报审核、下架和封禁。测试会创建临时数据；用于正式数据的数据库不建议直接运行该脚本。
+普通 Go 测试不依赖 MySQL。`npm run smoke` 使用 `.env` 中的连接账号创建随机的 `campus_it*_test` 临时库，在独立 HTTP 服务上验证业务后删除该临时库；账号需额外具备创建和删除数据库权限。它不向应用库 `DB_NAME` 写入测试数据，也无需事先启动后端。
 
-## 目录
+详细准备、手动验收和排错见 [测试说明](docs/测试说明.md)。
+
+云服务器建库、授权和建表见 [MySQL建表步骤](docs/云服务器MySQL建表.md)。
+
+## 分层结构
 
 ```text
-client/
-  public/demo/          演示插画
-  src/components/       通用组件
-  src/views/            页面
-  src/stores/           登录状态与提示
-server/
-  src/routes/           API 路由
-  src/db.ts             数据库结构与种子数据
-  src/realtime.ts       WebSocket 在线推送
-  scripts/smoke.mjs     端到端 API 冒烟测试
+client/                         Vue + TypeScript 页面、组件、样式
+server/cmd/server/              启动入口、依赖组装、优雅退出
+server/internal/config/         环境配置与校验
+server/internal/model/          业务模型与接口数据类型
+server/internal/httpapi/        路由、JSON、Cookie、上传及 HTTP 测试
+server/internal/service/        业务校验、权限、认证、流程和事件
+server/internal/repository/     MySQL 查询、事务、初始化数据
+server/internal/repository/migrations/  版本化 SQL 结构迁移
+server/internal/realtime/       WebSocket 连接、并发写入和心跳
+docs/                          项目约束与测试说明
+go.mod / go.sum                 Go 依赖
+package.json / package-lock.json 前端工具链依赖
 ```
 
-生产环境建议在前方配置 HTTPS 反向代理，并把 `JWT_SECRET` 设置为足够长的随机字符串。SQLite 数据与上传图片分别保存在 `server/data/` 和 `server/uploads/`，备份时需同时备份这两个目录。
+接口层通过业务层访问数据；SQL 只出现在 repository。HTTP 和数据库访问使用标准库 `net/http`、`database/sql`。四个直接 Go 依赖负责 MySQL、JWT、WebSocket 和 bcrypt，不引入 Web 框架或 ORM。后端已移除 Node.js 和 SQLite 运行路径。
+
+## 演示账号
+
+仅在 `SEED_DEMO=true` 且库中只有管理员时创建 `linzhi`、`zhouyu`、`chenmu`，密码均为 `Demo123!`。管理员使用首次初始化时 `.env` 配置的账号密码。
