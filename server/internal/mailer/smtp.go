@@ -1,0 +1,117 @@
+package mailer
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/tls"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"mime"
+	"mime/quotedprintable"
+	"net"
+	"net/mail"
+	"net/smtp"
+	"time"
+
+	"campus-fellow/server/internal/config"
+)
+
+type SMTP struct {
+	host, port, username, password, from, mode string
+	tlsConfig                                  *tls.Config
+}
+
+func NewSMTP(c config.Config) *SMTP {
+	return &SMTP{host: c.SMTPHost, port: c.SMTPPort, username: c.SMTPUsername, password: c.SMTPPassword, from: c.SMTPFrom, mode: c.SMTPTLSMode, tlsConfig: &tls.Config{ServerName: c.SMTPHost, MinVersion: tls.VersionTLS12}}
+}
+
+func (s *SMTP) SendVerification(ctx context.Context, to, code string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	connection, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(s.host, s.port))
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	deadline, _ := ctx.Deadline()
+	if err := connection.SetDeadline(deadline); err != nil {
+		return err
+	}
+	rawConnection := connection
+	stop := context.AfterFunc(ctx, func() { rawConnection.Close() })
+	defer stop()
+	if s.mode == "tls" {
+		secured := tls.Client(connection, s.tlsConfig)
+		if err := secured.HandshakeContext(ctx); err != nil {
+			return err
+		}
+		connection = secured
+	}
+	client, err := smtp.NewClient(connection, s.host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if s.mode == "starttls" {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return errors.New("SMTP server does not offer required STARTTLS")
+		}
+		if err := client.StartTLS(s.tlsConfig); err != nil {
+			return err
+		}
+	}
+	if _, ok := client.TLSConnectionState(); !ok {
+		return errors.New("SMTP connection must use TLS")
+	}
+	if err := client.Auth(smtp.PlainAuth("", s.username, s.password, s.host)); err != nil {
+		return err
+	}
+	from, err := mail.ParseAddress(s.from)
+	if err != nil {
+		return err
+	}
+	if err := client.Mail(from.Address); err != nil {
+		return err
+	}
+	if err := client.Rcpt(to); err != nil {
+		return err
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	message, err := verificationMessage(from.String(), to, code)
+	if err != nil {
+		writer.Close()
+		return err
+	}
+	if _, err := writer.Write(message); err != nil {
+		writer.Close()
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	// DATA's 250 reply confirms acceptance; a broken QUIT must not invalidate delivered codes.
+	_ = client.Quit()
+	return nil
+}
+
+func verificationMessage(from, to, code string) ([]byte, error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return nil, err
+	}
+	var message bytes.Buffer
+	fmt.Fprintf(&message, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: <%s@campus-fellow>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", from, to, mime.QEncoding.Encode("UTF-8", "搭个伴 · 校园邮箱验证码"), time.Now().UTC().Format(time.RFC1123Z), hex.EncodeToString(nonce[:]))
+	writer := quotedprintable.NewWriter(&message)
+	if _, err := fmt.Fprintf(writer, "你的注册验证码是：%s\r\n\r\n验证码有效时间为60秒，仅用于本次校园邮箱注册。\r\n如果不是你本人操作，请忽略此邮件。\r\n", code); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return message.Bytes(), nil
+}

@@ -65,9 +65,11 @@ func (s *Service) Authenticate(ctx context.Context, raw string) (*model.User, er
 }
 
 type RegisterInput struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Nickname string `json:"nickname"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	Nickname  string `json:"nickname"`
+	Email     string `json:"email"`
+	EmailCode string `json:"emailCode"`
 }
 type LoginInput struct {
 	Username string `json:"username"`
@@ -93,13 +95,26 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (model.User, e
 	if !length(in.Nickname, 1, 30) {
 		return model.User{}, fail(400, "昵称应为1—30个字符")
 	}
+	email, err := s.campusEmail(in.Email)
+	if err != nil {
+		return model.User{}, err
+	}
+	if !verificationCodePattern.MatchString(in.EmailCode) {
+		return model.User{}, fail(400, "请输入邮箱收到的6位验证码")
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), 12)
 	if err != nil {
 		return model.User{}, err
 	}
-	u, err := s.Repo.CreateUser(ctx, in.Username, string(hash), in.Nickname)
+	u, err := s.Repo.RegisterVerified(ctx, in.Username, string(hash), in.Nickname, email, s.codeHash(email, in.EmailCode))
 	if repository.Duplicate(err) {
-		return u, fail(409, "这个账号已经被使用")
+		return u, fail(409, "账号或邮箱已经被使用")
+	}
+	if errors.Is(err, repository.ErrCodeInvalid) {
+		return u, fail(400, "验证码错误、已过期或已使用，请检查后重新发送")
+	}
+	if errors.Is(err, repository.ErrCodeAttempts) {
+		return u, fail(429, "验证码错误次数过多，请重新发送验证码")
 	}
 	u.Status = ""
 	return u, err

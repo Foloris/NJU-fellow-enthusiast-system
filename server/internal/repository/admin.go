@@ -32,12 +32,13 @@ func (r *Repository) AdminUsers(ctx context.Context, q string) ([]model.AdminUse
 	items := []model.AdminUser{}
 	for rows.Next() {
 		var u model.AdminUser
-		var avatar sql.NullString
+		var avatar, email sql.NullString
 		var created time.Time
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Nickname, &avatar, &u.Bio, &u.Role, &u.Status, &created, &u.PostCount); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Nickname, &avatar, &u.Bio, &u.Role, &u.Status, &created, &email, &u.PostCount); err != nil {
 			return nil, err
 		}
 		u.Avatar = optionalString(avatar)
+		u.Email = optionalString(email)
 		u.CreatedAt = timestamp(created)
 		items = append(items, u)
 	}

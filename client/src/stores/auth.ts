@@ -1,6 +1,6 @@
 import { computed, reactive } from "vue";
 import { api } from "@/api";
-import type { User } from "@/types";
+import type { User, RegistrationConfig, EmailCodeResult } from "@/types";
 
 const state = reactive<{
   user: User | null;
@@ -35,13 +35,24 @@ async function login(username: string, password: string) {
   state.initialized = true;
 }
 
-async function register(username: string, password: string, nickname: string) {
+async function register(username: string, password: string, nickname: string, email: string, emailCode: string) {
   const data = await api<{ user: User }>("/api/auth/register", {
     method: "POST",
-    body: JSON.stringify({ username, password, nickname }),
+    body: JSON.stringify({ username, password, nickname, email, emailCode }),
   });
   state.user = data.user;
   state.initialized = true;
+}
+
+function registrationConfig() {
+  return api<RegistrationConfig>("/api/auth/registration-config");
+}
+
+function sendEmailCode(email: string) {
+  return api<EmailCodeResult>("/api/auth/email-code", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
 }
 
 async function logout() {
@@ -60,6 +71,8 @@ export const auth = {
   loadMe,
   login,
   register,
+  registrationConfig,
+  sendEmailCode,
   logout,
   updateUser,
 };

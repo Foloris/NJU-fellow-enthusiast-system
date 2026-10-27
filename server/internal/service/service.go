@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -9,8 +10,9 @@ import (
 )
 
 type Error struct {
-	Status  int
-	Message string
+	Status     int
+	Message    string
+	RetryAfter int
 }
 
 func (e *Error) Error() string              { return e.Message }
@@ -23,11 +25,26 @@ func missing(err error, message string) error {
 }
 
 type Service struct {
-	Repo   *repository.Repository
-	Tokens *Tokens
-	Events Publisher
+	Repo        *repository.Repository
+	Tokens      *Tokens
+	Events      Publisher
+	emailDomain string
+	mailer      VerificationMailer
 }
 
-func New(repo *repository.Repository, tokens *Tokens, events Publisher) *Service {
-	return &Service{Repo: repo, Tokens: tokens, Events: events}
+type VerificationMailer interface {
+	SendVerification(context.Context, string, string) error
+}
+type Option func(*Service)
+
+func WithEmailVerification(domain string, mailer VerificationMailer) Option {
+	return func(s *Service) { s.emailDomain = domain; s.mailer = mailer }
+}
+
+func New(repo *repository.Repository, tokens *Tokens, events Publisher, options ...Option) *Service {
+	s := &Service{Repo: repo, Tokens: tokens, Events: events, emailDomain: "smail.nju.edu.cn"}
+	for _, option := range options {
+		option(s)
+	}
+	return s
 }

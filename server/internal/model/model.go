@@ -5,6 +5,7 @@ import "encoding/json"
 type User struct {
 	ID           int64   `json:"id"`
 	Username     string  `json:"username"`
+	Email        *string `json:"email"`
 	Nickname     string  `json:"nickname"`
 	Avatar       *string `json:"avatar"`
 	Bio          string  `json:"bio"`

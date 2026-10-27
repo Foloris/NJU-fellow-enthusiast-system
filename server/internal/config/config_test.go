@@ -49,3 +49,21 @@ func TestConfigurationRejectsUnsafeProduction(t *testing.T) {
 		t.Fatal("accepted weak secret")
 	}
 }
+
+func TestEmailConfiguration(t *testing.T) {
+	base := Config{CampusEmailDomain: "smail.nju.edu.cn", SMTPHost: "smtp.qq.com", SMTPPort: "465", SMTPTLSMode: "tls", SMTPUsername: "sender@qq.com", SMTPPassword: "application-password"}
+	if err := base.validateEmail(); err != nil || base.SMTPFrom != "sender@qq.com" {
+		t.Fatalf("valid SMTP config: %v", err)
+	}
+	for _, change := range []func(*Config){
+		func(c *Config) { c.CampusEmailDomain = "nju.edu.cn,smail.nju.edu.cn" },
+		func(c *Config) { c.SMTPPort = "25bad" }, func(c *Config) { c.SMTPTLSMode = "none" },
+		func(c *Config) { c.SMTPPassword = "" }, func(c *Config) { c.SMTPFrom = "sender@qq.com\r\nBcc: bad@example.com" },
+	} {
+		c := base
+		change(&c)
+		if c.validateEmail() == nil {
+			t.Fatal("invalid email configuration accepted")
+		}
+	}
+}

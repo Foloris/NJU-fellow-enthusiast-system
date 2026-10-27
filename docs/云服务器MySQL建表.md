@@ -2,7 +2,7 @@
 
 适用：在云服务器终端操作，使用 MySQL 8.0 或更高版本，库名为 `bigshot`。本项目使用 MySQL 的 `utf8mb4_0900_*` 排序规则，不适用于 MySQL 5.7 或直接替换为 MariaDB。
 
-建表 SQL 的唯一来源是 `server/internal/repository/migrations/001_initial.sql`。推荐由 Go 迁移程序执行，它会记录迁移版本、串行执行建表，成功后才登记完成。
+建表 SQL 的唯一来源是 `server/internal/repository/migrations/` 中按版本排列的文件。当前为 `001_initial.sql` 和 `002_email_verification.sql`。推荐由 Go 迁移程序执行，它会记录迁移版本、串行执行建表，成功后才登记完成。
 
 ## 1. 创建数据库
 
@@ -99,7 +99,7 @@ SHOW CREATE TABLE applications\G
 EXIT;
 ```
 
-全新数据库应包含下列11张表，迁移版本应包含 `001_initial.sql`：
+全新数据库应包含下列14张表，迁移版本应包含 `001_initial.sql` 和 `002_email_verification.sql`：
 
 | 表 | 用途 |
 | --- | --- |
@@ -113,6 +113,9 @@ EXIT;
 | conversations | 申请通过后建立的会话，一份申请对应一个会话 |
 | messages | 会话消息及已读时间 |
 | reports | 举报、证据快照与审核结果 |
+| user_emails | 用户与已验证校园邮箱的唯一绑定 |
+| email_verifications | 邮箱验证码摘要、有效期和错误次数 |
+| email_verification_send_limits | 验证码发送来源频率限制 |
 | schema_migrations | 已执行的数据库迁移版本 |
 
 全部业务表使用 InnoDB，通过外键保持关联。删除搭子会级联删除申请、会话和消息；举报快照保留其被举报对象的文本证据。建表成功后不需要手工插入管理员或明文密码。
@@ -123,9 +126,10 @@ EXIT;
 
 ```bash
 mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3306 -u bigshot_app -p bigshot < server/internal/repository/migrations/001_initial.sql
+mysql --default-character-set=utf8mb4 -h 127.0.0.1 -P 3306 -u bigshot_app -p bigshot < server/internal/repository/migrations/002_email_verification.sql
 ```
 
-这一步只创建10张业务表。后续 Go 服务首次启动会创建 `schema_migrations` 并登记版本；初始 SQL 使用 `CREATE TABLE IF NOT EXISTS`，不会重复插入业务数据。不要在 SQL 出错后手工登记迁移成功，也不要使用 `--force` 忽略错误。
+这两步创建13张业务和验证相关表。后续 Go 服务首次启动会创建 `schema_migrations` 并登记版本；SQL 使用 `CREATE TABLE IF NOT EXISTS`，不会重复插入业务数据。不要在 SQL 出错后手工登记迁移成功，也不要使用 `--force` 忽略错误。
 
 ## 本次准备与验证
 

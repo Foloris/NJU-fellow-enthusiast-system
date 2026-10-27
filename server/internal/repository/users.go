@@ -8,13 +8,14 @@ import (
 	"campus-fellow/server/internal/model"
 )
 
-const userColumns = "id, username, password_hash, nickname, avatar, bio, role, status, created_at"
+const userColumns = "id, username, password_hash, nickname, avatar, bio, role, status, created_at, (SELECT email FROM user_emails WHERE user_id=users.id)"
 
 func scanUser(row scanner) (model.User, error) {
 	var u model.User
-	var avatar sql.NullString
+	var avatar, email sql.NullString
 	var created time.Time
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Nickname, &avatar, &u.Bio, &u.Role, &u.Status, &created)
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Nickname, &avatar, &u.Bio, &u.Role, &u.Status, &created, &email)
+	u.Email = optionalString(email)
 	u.Avatar = optionalString(avatar)
 	u.CreatedAt = timestamp(created)
 	return u, err
@@ -25,18 +26,6 @@ func (r *Repository) UserByID(ctx context.Context, id int64) (model.User, error)
 }
 func (r *Repository) UserByUsername(ctx context.Context, name string) (model.User, error) {
 	return scanUser(r.db.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE username = ?", name))
-}
-
-func (r *Repository) CreateUser(ctx context.Context, name, hash, nickname string) (model.User, error) {
-	result, err := r.db.ExecContext(ctx, "INSERT INTO users(username,password_hash,nickname) VALUES (?,?,?)", name, hash, nickname)
-	if err != nil {
-		return model.User{}, err
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return model.User{}, err
-	}
-	return r.UserByID(ctx, id)
 }
 
 func (r *Repository) UpdateProfile(ctx context.Context, id int64, nickname, bio string, avatar *string) (model.User, error) {

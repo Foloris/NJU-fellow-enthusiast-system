@@ -13,6 +13,7 @@ import (
 
 	"campus-fellow/server/internal/config"
 	"campus-fellow/server/internal/httpapi"
+	"campus-fellow/server/internal/mailer"
 	"campus-fellow/server/internal/realtime"
 	"campus-fellow/server/internal/repository"
 	"campus-fellow/server/internal/service"
@@ -57,7 +58,13 @@ func run() error {
 	}
 	hub := realtime.New()
 	defer hub.Close()
-	app := service.New(repo, service.NewTokens(cfg.JWTSecret), hub)
+	var sender service.VerificationMailer
+	if cfg.SMTPHost != "" {
+		sender = mailer.NewSMTP(cfg)
+	} else {
+		slog.Warn("SMTP not configured; email-code registration is unavailable")
+	}
+	app := service.New(repo, service.NewTokens(cfg.JWTSecret), hub, service.WithEmailVerification(cfg.CampusEmailDomain, sender))
 	server := &http.Server{Addr: cfg.Address, Handler: httpapi.New(app, hub, cfg), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	stopping, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -92,7 +92,7 @@ async function saveProfile() {
 
 async function logout() {
   await auth.logout();
-  router.push("/");
+  await router.replace({ name: "login" });
   notify("已安全退出");
 }
 

@@ -1,12 +1,26 @@
 export type User = {
   id: number;
   username: string;
+  email: string | null;
   nickname: string;
   avatar: string | null;
   bio: string;
   role: "user" | "admin";
   status?: "active" | "banned";
   created_at: string;
+};
+
+export type RegistrationConfig = {
+  emailDomain: string;
+  codeLifetimeSeconds: number;
+  resendAfterSeconds: number;
+  emailDeliveryAvailable: boolean;
+};
+
+export type EmailCodeResult = {
+  message: string;
+  expiresIn: number;
+  retryAfter: number;
 };
 
 export type Author = {

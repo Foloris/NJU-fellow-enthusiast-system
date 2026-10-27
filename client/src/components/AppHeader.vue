@@ -31,7 +31,7 @@ async function logout() {
     await auth.logout();
     mobileOpen.value = false;
     notify("已安全退出");
-    router.push("/");
+    await router.replace({ name: "login" });
   } catch (error) {
     notify(error instanceof Error ? error.message : "退出失败", "error");
   }

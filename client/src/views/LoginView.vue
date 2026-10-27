@@ -1,21 +1,42 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowRight, Leaf, ShieldCheck, Users } from "lucide-vue-next";
 import { auth } from "@/stores/auth";
 import { notify } from "@/stores/toast";
+import type { RegistrationConfig } from "@/types";
 
 const route = useRoute();
 const router = useRouter();
 const tab = ref(route.query.tab === "register" ? "register" : "login");
 const submitting = ref(false);
 const confirmPasswordInput = ref<HTMLInputElement | null>(null);
+const registrationConfig = ref<RegistrationConfig | null>(null);
+const configError = ref("");
+const emailSending = ref(false);
+const resendAt = ref(0);
+const codeExpiresAt = ref(0);
+const sentEmail = ref("");
+const clock = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
 const form = reactive({
   username: "",
   password: "",
   confirmPassword: "",
   nickname: "",
+  email: "",
+  emailCode: "",
 });
+const normalizedEmail = computed(() => form.email.trim().toLowerCase());
+const emailValid = computed(() => {
+  const parts = normalizedEmail.value.split("@");
+  return parts.length === 2 && parts[0].length > 0 &&
+    !/\s/.test(normalizedEmail.value) && parts[1] === registrationConfig.value?.emailDomain;
+});
+const resendSeconds = computed(() => Math.max(0, Math.ceil((resendAt.value - clock.value) / 1000)));
+const codeExpired = computed(() => codeExpiresAt.value > 0 && clock.value >= codeExpiresAt.value);
+const canSendCode = computed(() => emailValid.value && registrationConfig.value?.emailDeliveryAvailable &&
+  !emailSending.value && !submitting.value && resendSeconds.value === 0);
 const title = computed(() =>
   tab.value === "login" ? "欢迎回来，继续遇见同好" : "从一个校园身份开始",
 );
@@ -23,6 +44,43 @@ const passwordMismatch = computed(
   () => tab.value === "register" && form.confirmPassword.length > 0 &&
     form.password !== form.confirmPassword,
 );
+
+watch(normalizedEmail, () => { form.emailCode = ""; });
+
+function syncClock() { clock.value = Date.now(); }
+
+async function loadRegistrationConfig() {
+  configError.value = "";
+  try { registrationConfig.value = await auth.registrationConfig(); }
+  catch { configError.value = "邮箱配置加载失败，请刷新页面重试。"; }
+}
+
+async function sendCode() {
+  if (!canSendCode.value) return;
+  emailSending.value = true;
+  const recipient = normalizedEmail.value;
+  try {
+    const result = await auth.sendEmailCode(recipient);
+    syncClock();
+    resendAt.value = clock.value + result.retryAfter * 1000;
+    codeExpiresAt.value = clock.value + result.expiresIn * 1000;
+    sentEmail.value = recipient;
+    form.emailCode = "";
+    notify(result.message);
+  } catch (error) {
+    notify(error instanceof Error ? error.message : "验证码发送失败，请稍后重试", "error");
+  } finally { emailSending.value = false; }
+}
+
+onMounted(() => {
+  void loadRegistrationConfig();
+  clockTimer = setInterval(syncClock, 1000);
+  document.addEventListener("visibilitychange", syncClock);
+});
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer);
+  document.removeEventListener("visibilitychange", syncClock);
+});
 
 watch(
   () => route.query.tab,
@@ -38,7 +96,11 @@ function switchTab(value: string) {
 }
 
 async function submit() {
-  if (submitting.value) return;
+  if (submitting.value || emailSending.value) return;
+  if (tab.value === "register" && !emailValid.value) {
+    notify("请填写允许后缀的校园邮箱", "error");
+    return;
+  }
   if (tab.value === "register" && form.password !== form.confirmPassword) {
     notify("两次输入的密码不一致，请重新确认", "error");
     confirmPasswordInput.value?.focus();
@@ -50,7 +112,7 @@ async function submit() {
       await auth.login(form.username, form.password);
       notify("欢迎回来");
     } else {
-      await auth.register(form.username, form.password, form.nickname);
+      await auth.register(form.username, form.password, form.nickname, normalizedEmail.value, form.emailCode.trim());
       notify("账号创建成功，欢迎加入");
     }
     const requestedRedirect = route.query.redirect;
@@ -121,6 +183,47 @@ async function submit() {
               placeholder="至少 8 位"
             />
           </label>
+          <div v-if="tab === 'register'" class="registration-email">
+            <label for="registration-email">校园邮箱</label>
+            <div class="email-code-row">
+              <input
+                id="registration-email"
+                v-model="form.email"
+                type="email"
+                maxlength="254"
+                required
+                autocomplete="email"
+                :readonly="emailSending"
+                :placeholder="registrationConfig ? `请输入 @${registrationConfig.emailDomain} 邮箱` : '请输入校园邮箱'"
+                aria-describedby="email-domain-hint"
+              />
+              <button class="button secondary email-code-button" type="button" :disabled="!canSendCode" @click="sendCode">
+                {{ emailSending ? "发送中…" : resendSeconds > 0 ? `${resendSeconds}秒后重发` : "发送验证码" }}
+              </button>
+            </div>
+            <small id="email-domain-hint" class="email-help">
+              {{ registrationConfig ? `目前仅支持 @${registrationConfig.emailDomain}，验证码有效期60秒。` : configError || "正在加载邮箱配置…" }}
+            </small>
+            <small v-if="registrationConfig && !registrationConfig.emailDeliveryAvailable" class="password-error" role="status">
+              邮件发送服务尚未配置，请联系管理员。
+            </small>
+            <small v-if="sentEmail === normalizedEmail && codeExpiresAt" class="email-help" role="status">
+              {{ codeExpired ? "验证码已过期，请重新发送。" : `验证码已发送至 ${sentEmail}，请检查收件箱或垃圾邮件。` }}
+            </small>
+          </div>
+          <label v-if="tab === 'register'">
+            <span>邮箱验证码</span>
+            <input
+              v-model="form.emailCode"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              pattern="[0-9]{6}"
+              minlength="6"
+              maxlength="6"
+              required
+              placeholder="请输入6位邮箱验证码"
+            />
+          </label>
           <label v-if="tab === 'register'">
             <span>确认密码</span>
             <input
@@ -139,7 +242,7 @@ async function submit() {
               两次输入的密码不一致
             </small>
           </label>
-          <button class="button auth-submit" :disabled="submitting">
+          <button class="button auth-submit" :disabled="submitting || emailSending">
             {{ submitting ? "请稍候…" : tab === "login" ? "登录" : "创建账号" }}
             <ArrowRight :size="18" />
           </button>
@@ -156,5 +259,10 @@ async function submit() {
 .password-error {
   color: #b42318;
 }
+.registration-email { display: flex; flex-direction: column; gap: 7px; }
+.email-code-row { display: flex; align-items: stretch; gap: 8px; }
+.email-code-row input { flex: 1; min-width: 0; }
+.email-code-button { flex-shrink: 0; padding: 10px 12px; white-space: nowrap; font-size: 12px; }
+.email-help { color: var(--muted); font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }
 </style>
 

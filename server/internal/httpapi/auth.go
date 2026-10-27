@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"net"
 	"net/http"
 	"time"
 
@@ -9,6 +10,28 @@ import (
 )
 
 func (a *API) routes() {
+	a.handle("GET /api/auth/registration-config", "", func(w http.ResponseWriter, _ *http.Request, _ model.User) error {
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, a.service.RegistrationSettings())
+		return nil
+	})
+	a.handle("POST /api/auth/email-code", "", func(w http.ResponseWriter, r *http.Request, _ model.User) error {
+		in, err := decode[service.EmailCodeInput](w, r)
+		if err != nil {
+			return err
+		}
+		source, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			source = r.RemoteAddr
+		}
+		result, err := a.service.SendEmailCode(r.Context(), in.Email, source)
+		if err != nil {
+			return err
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, 200, result)
+		return nil
+	})
 	a.handle("GET /api/health", "", func(w http.ResponseWriter, r *http.Request, _ model.User) error {
 		if err := a.service.Health(r.Context()); err != nil {
 			return err

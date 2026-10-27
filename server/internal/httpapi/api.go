@@ -103,6 +103,9 @@ func writeJSON[T any](w http.ResponseWriter, status int, value T) {
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	var e *service.Error
 	if errors.As(err, &e) {
+		if e.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(e.RetryAfter))
+		}
 		writeJSON(w, e.Status, messageResponse{Message: e.Message})
 		return
 	}

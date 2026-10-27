@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,10 +35,46 @@ import (
 )
 
 var mysqlTests = flag.Bool("mysql", false, "run integration tests in a temporary MySQL database")
+var browserEmailTests = flag.Bool("browser-email", false, "serve real frontend with a disposable email test inbox; requires -mysql")
 
 type testClient struct {
 	client *http.Client
 	base   string
+}
+
+type testMailbox struct {
+	mu    sync.Mutex
+	codes map[string]string
+	fail  bool
+}
+
+func (m *testMailbox) SendVerification(_ context.Context, email, code string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail {
+		return fmt.Errorf("simulated SMTP failure")
+	}
+	if m.codes == nil {
+		m.codes = make(map[string]string)
+	}
+	m.codes[email] = code
+	return nil
+}
+func (m *testMailbox) code(email string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.codes[email]
+}
+func (m *testMailbox) setFailure(fail bool) { m.mu.Lock(); defer m.mu.Unlock(); m.fail = fail }
+
+func registerVerified(t *testing.T, c testClient, mailbox *testMailbox, in service.RegisterInput, status int) userResponse {
+	t.Helper()
+	if in.Email == "" {
+		in.Email = strings.ToLower(in.Username) + "@test.campus.example"
+	}
+	call[service.EmailCodeResult](t, c, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: in.Email}, 200)
+	in.EmailCode = mailbox.code(in.Email)
+	return call[userResponse](t, c, "POST", "/api/auth/register", in, status)
 }
 
 func newClient(base string) testClient {
@@ -162,6 +199,9 @@ func TestIntegration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfg.ClientDir, "index.html"), []byte("<html>test SPA</html>"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if *browserEmailTests {
+		cfg.ClientDir = filepath.Join(root, "client/dist")
+	}
 	ctx := context.Background()
 	repo, err := repository.Open(ctx, cfg)
 	if err != nil {
@@ -205,21 +245,122 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	hub := realtime.New()
-	app := service.New(repo, service.NewTokens(cfg.JWTSecret), hub)
-	server := httptest.NewServer(New(app, hub, cfg))
+	mailbox := &testMailbox{}
+	app := service.New(repo, service.NewTokens("isolated-integration-test-jwt-key-with-32-bytes"), hub, service.WithEmailVerification("test.campus.example", mailbox))
+	handler := New(app, hub, cfg)
+	var browserDone <-chan struct{}
+	if *browserEmailTests {
+		handler, browserDone = emailBrowserFixture(handler, mailbox)
+	}
+	server := httptest.NewServer(handler)
 	t.Cleanup(func() { hub.Close(); server.Close() })
+	if *browserEmailTests {
+		t.Logf("BROWSER_EMAIL_URL=%s (test inbox: %s/__test/mailbox)", server.URL, server.URL)
+		select {
+		case <-browserDone:
+			return
+		case <-time.After(10 * time.Minute):
+			t.Fatal("browser email fixture timed out")
+		}
+	}
 	guest, alice, bob, outsider, admin := newClient(server.URL), newClient(server.URL), newClient(server.URL), newClient(server.URL), newClient(server.URL)
 	call[userResponse](t, admin, "POST", "/api/auth/login", service.LoginInput{Username: prefix + "_admin", Password: password}, 200)
-	aliceUser := call[userResponse](t, alice, "POST", "/api/auth/register", service.RegisterInput{Username: prefix + "_a", Password: password, Nickname: "测试甲😀"}, 201)
-	bobUser := call[userResponse](t, bob, "POST", "/api/auth/register", service.RegisterInput{Username: prefix + "_b", Password: password, Nickname: "测试乙"}, 201)
-	call[userResponse](t, outsider, "POST", "/api/auth/register", service.RegisterInput{Username: prefix + "_c", Password: password, Nickname: "无关用户"}, 201)
+	aliceUser := registerVerified(t, alice, mailbox, service.RegisterInput{Username: prefix + "_a", Password: password, Nickname: "测试甲😀"}, 201)
+	bobUser := registerVerified(t, bob, mailbox, service.RegisterInput{Username: prefix + "_b", Password: password, Nickname: "测试乙"}, 201)
+	registerVerified(t, outsider, mailbox, service.RegisterInput{Username: prefix + "_c", Password: password, Nickname: "无关用户"}, 201)
+	t.Run("email verification policy and single use", func(t *testing.T) {
+		settings := call[service.RegistrationSettings](t, guest, "GET", "/api/auth/registration-config", nil, 200)
+		if settings.EmailDomain != "test.campus.example" || settings.CodeLifetimeSeconds != 60 || !settings.EmailDeliveryAvailable {
+			t.Fatalf("registration settings: %+v", settings)
+		}
+		for _, email := range []string{"not-an-email", "student@other.example", "student@sub.test.campus.example", "Name <student@test.campus.example>"} {
+			call[messageResponse](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 400)
+		}
+		call[messageResponse](t, guest, "POST", "/api/auth/register", service.RegisterInput{Username: prefix + "_no_code", Password: password, Nickname: "缺少验证码", Email: prefix + "_none@test.campus.example"}, 400)
+		email := prefix + "_verify@test.campus.example"
+		result := call[service.EmailCodeResult](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: strings.ToUpper(email)}, 200)
+		if result.ExpiresIn != 60 || result.RetryAfter != 60 {
+			t.Fatal("code must expire after 60 seconds")
+		}
+		call[messageResponse](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 429)
+		in := service.RegisterInput{Username: prefix + "_verify", Password: password, Nickname: "邮箱验证", Email: email, EmailCode: "000000"}
+		if mailbox.code(email) == in.EmailCode {
+			in.EmailCode = "999999"
+		}
+		call[messageResponse](t, guest, "POST", "/api/auth/register", in, 400)
+		in.EmailCode = mailbox.code(email)
+		if _, err := testDB.Exec("UPDATE email_verifications SET expires_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE email=?", email); err != nil {
+			t.Fatal(err)
+		}
+		call[messageResponse](t, guest, "POST", "/api/auth/register", in, 400)
+		if _, err := testDB.Exec("UPDATE email_verifications SET next_send_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE email=?", email); err != nil {
+			t.Fatal(err)
+		}
+		call[service.EmailCodeResult](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 200)
+		in.EmailCode = mailbox.code(email)
+		created := call[userResponse](t, guest, "POST", "/api/auth/register", in, 201)
+		if created.User.Email == nil || *created.User.Email != email {
+			t.Fatal("verified mailbox not bound to account")
+		}
+		var stored string
+		var validSeconds int
+		if err := testDB.QueryRow("SELECT code_hash,TIMESTAMPDIFF(SECOND,UTC_TIMESTAMP(3),expires_at) FROM email_verifications WHERE email=?", email).Scan(&stored, &validSeconds); err != nil {
+			t.Fatal(err)
+		}
+		if stored == in.EmailCode || len(stored) != 64 || validSeconds > 60 {
+			t.Fatal("code must be stored as digest with 60 second expiry")
+		}
+		in.Username = prefix + "_reuse"
+		call[messageResponse](t, guest, "POST", "/api/auth/register", in, 400)
+		call[messageResponse](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 409)
+		call[messageResponse](t, guest, "POST", "/api/auth/logout", nil, 200)
+	})
+	t.Run("wrong code attempts and rollback", func(t *testing.T) {
+		email := prefix + "_attempts@test.campus.example"
+		call[service.EmailCodeResult](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 200)
+		in := service.RegisterInput{Username: prefix + "_attempts", Password: password, Nickname: "错误次数", Email: email, EmailCode: "000000"}
+		if in.EmailCode == mailbox.code(email) {
+			in.EmailCode = "999999"
+		}
+		for i := 0; i < 5; i++ {
+			status := 400
+			if i == 4 {
+				status = 429
+			}
+			call[messageResponse](t, guest, "POST", "/api/auth/register", in, status)
+		}
+		in.EmailCode = mailbox.code(email)
+		call[messageResponse](t, guest, "POST", "/api/auth/register", in, 429)
+		var count int
+		if err := testDB.QueryRow("SELECT COUNT(*) FROM users WHERE username=?", in.Username).Scan(&count); err != nil || count != 0 {
+			t.Fatal("invalid codes created a user")
+		}
+		duplicateEmail := prefix + "_dup@test.campus.example"
+		call[service.EmailCodeResult](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: duplicateEmail}, 200)
+		duplicate := service.RegisterInput{Username: prefix + "_a", Password: password, Nickname: "重复账号", Email: duplicateEmail, EmailCode: mailbox.code(duplicateEmail)}
+		call[messageResponse](t, guest, "POST", "/api/auth/register", duplicate, 409)
+		duplicate.Username = prefix + "_rollback"
+		call[userResponse](t, guest, "POST", "/api/auth/register", duplicate, 201)
+		call[messageResponse](t, guest, "POST", "/api/auth/logout", nil, 200)
+	})
+	t.Run("SMTP failure cannot activate a code", func(t *testing.T) {
+		email := prefix + "_smtp@test.campus.example"
+		mailbox.setFailure(true)
+		call[messageResponse](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 503)
+		mailbox.setFailure(false)
+		var count int
+		if err := testDB.QueryRow("SELECT COUNT(*) FROM email_verifications WHERE email=?", email).Scan(&count); err != nil || count != 0 {
+			t.Fatal("SMTP failure left a usable verification")
+		}
+		call[service.EmailCodeResult](t, guest, "POST", "/api/auth/email-code", service.EmailCodeInput{Email: email}, 200)
+	})
 	t.Run("authentication and authorization", func(t *testing.T) {
 		if call[userResponse](t, guest, "GET", "/api/auth/me", nil, 200).User != nil {
 			t.Fatal("guest has user")
 		}
 		call[messageResponse](t, guest, "POST", "/api/exchange/posts", model.ExchangeInput{}, 401)
 		call[messageResponse](t, bob, "GET", "/api/admin/summary", nil, 403)
-		call[messageResponse](t, guest, "POST", "/api/auth/register", service.RegisterInput{Username: strings.ToUpper(prefix + "_a"), Password: password, Nickname: "重复账号"}, 409)
+		registerVerified(t, guest, mailbox, service.RegisterInput{Username: strings.ToUpper(prefix + "_a"), Password: password, Nickname: "重复账号", Email: prefix + "_case@test.campus.example"}, 409)
 		call[messageResponse](t, guest, "POST", "/api/auth/login", service.LoginInput{Username: prefix + "_a", Password: "wrong"}, 401)
 		call[userResponse](t, guest, "POST", "/api/auth/login", service.LoginInput{Username: strings.ToUpper(prefix + "_a"), Password: password}, 200)
 		call[messageResponse](t, guest, "POST", "/api/auth/logout", nil, 200)
@@ -539,7 +680,7 @@ func TestIntegration(t *testing.T) {
 		}{"active"}, 200)
 		call[model.Summary](t, admin, "GET", "/api/admin/summary", nil, 200)
 		users := call[model.List[model.AdminUser]](t, admin, "GET", "/api/admin/users?q="+prefix, nil, 200)
-		if len(users.Items) != 4 {
+		if len(users.Items) != 6 {
 			t.Fatal("admin user search mismatch")
 		}
 		call[struct {

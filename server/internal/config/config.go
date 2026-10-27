@@ -4,26 +4,35 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Address       string
-	DBHost        string
-	DBPort        string
-	DBName        string
-	DBUser        string
-	DBPassword    string
-	JWTSecret     string
-	AdminUsername string
-	AdminPassword string
-	SeedDemo      bool
-	Production    bool
-	UploadDir     string
-	ClientDir     string
+	Address           string
+	DBHost            string
+	DBPort            string
+	DBName            string
+	DBUser            string
+	DBPassword        string
+	JWTSecret         string
+	AdminUsername     string
+	AdminPassword     string
+	SeedDemo          bool
+	Production        bool
+	UploadDir         string
+	ClientDir         string
+	CampusEmailDomain string
+	SMTPHost          string
+	SMTPPort          string
+	SMTPUsername      string
+	SMTPPassword      string
+	SMTPFrom          string
+	SMTPTLSMode       string
 }
 
 // LoadEnv supports KEY=value, comments and quoted values. Process variables take precedence.
@@ -70,6 +79,10 @@ func Load() (Config, error) {
 		JWTSecret: os.Getenv("JWT_SECRET"), AdminUsername: env("ADMIN_USERNAME", "admin"), AdminPassword: os.Getenv("ADMIN_PASSWORD"),
 		SeedDemo: os.Getenv("SEED_DEMO") == "true", Production: os.Getenv("APP_ENV") == "production",
 		UploadDir: env("UPLOAD_DIR", "server/uploads"), ClientDir: env("CLIENT_DIST_DIR", "client/dist"),
+		CampusEmailDomain: strings.ToLower(strings.TrimPrefix(strings.TrimSpace(env("CAMPUS_EMAIL_DOMAIN", "smail.nju.edu.cn")), "@")),
+		SMTPHost:          strings.TrimSpace(os.Getenv("SMTP_HOST")), SMTPPort: env("SMTP_PORT", "465"),
+		SMTPUsername: os.Getenv("SMTP_USERNAME"), SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom: strings.TrimSpace(os.Getenv("SMTP_FROM")), SMTPTLSMode: env("SMTP_TLS_MODE", "tls"),
 	}
 	if len(c.JWTSecret) < 32 || c.JWTSecret == "replace-this-with-a-long-random-string" {
 		return c, errors.New("JWT_SECRET must be a non-placeholder secret of at least 32 bytes")
@@ -83,6 +96,9 @@ func Load() (Config, error) {
 	if port, err := strconv.Atoi(c.DBPort); err != nil || port < 1 || port > 65535 {
 		return c, errors.New("DB_PORT is invalid")
 	}
+	if err := c.validateEmail(); err != nil {
+		return c, err
+	}
 	for _, p := range []*string{&c.UploadDir, &c.ClientDir} {
 		absolute, err := filepath.Abs(*p)
 		if err != nil {
@@ -91,6 +107,38 @@ func Load() (Config, error) {
 		*p = absolute
 	}
 	return c, nil
+}
+
+var domainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+func (c *Config) validateEmail() error {
+	if len(c.CampusEmailDomain) > 253 || !domainPattern.MatchString(c.CampusEmailDomain) {
+		return errors.New("CAMPUS_EMAIL_DOMAIN must contain exactly one email domain, e.g. smail.nju.edu.cn")
+	}
+	// An unconfigured sender leaves existing login available, but new registration cannot send codes.
+	if c.SMTPHost == "" {
+		return nil
+	}
+	if strings.ContainsAny(c.SMTPHost, "\r\n/: ") {
+		return errors.New("SMTP_HOST must be a hostname without scheme or port")
+	}
+	if port, err := strconv.Atoi(c.SMTPPort); err != nil || port < 1 || port > 65535 {
+		return errors.New("SMTP_PORT is invalid")
+	}
+	if c.SMTPTLSMode != "tls" && c.SMTPTLSMode != "starttls" {
+		return errors.New("SMTP_TLS_MODE must be tls or starttls")
+	}
+	if c.SMTPUsername == "" || c.SMTPPassword == "" {
+		return errors.New("SMTP_USERNAME and SMTP_PASSWORD are required when SMTP_HOST is set")
+	}
+	if c.SMTPFrom == "" {
+		c.SMTPFrom = c.SMTPUsername
+	}
+	address, err := mail.ParseAddress(c.SMTPFrom)
+	if err != nil || strings.ContainsAny(c.SMTPFrom, "\r\n") || address.Address == "" {
+		return errors.New("SMTP_FROM must be a valid sender mailbox")
+	}
+	return nil
 }
 
 func env(key, fallback string) string {

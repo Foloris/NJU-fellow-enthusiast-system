@@ -2,7 +2,7 @@
 
 Vue 3 + TypeScript 前端、Go 后端、MySQL 数据库。支持同好分享、校园新闻、搭子申请、审批后实时私信、举报及管理员审核，沿用原有页面设计和业务流程。
 
-网页需要登录后访问；未登录打开首页或业务链接会先进入登录/注册页。注册需要确认密码，成功后自动登录并进入原目标页面。
+网页需要登录后访问；未登录打开首页或业务链接会先进入登录/注册页。新账号注册需要确认密码、校园邮箱及邮件验证码，成功后自动登录并进入原目标页面。
 
 ## 环境
 
@@ -43,6 +43,11 @@ npm run dev
 | `SEED_DEMO` | 默认 `false`，示例为 `true`；生产必须 `false` |
 | `UPLOAD_DIR` | `server/uploads` |
 | `CLIENT_DIST_DIR` | `client/dist` |
+| `CAMPUS_EMAIL_DOMAIN` | `smail.nju.edu.cn`，唯一允许注册的邮箱域名，不带@ |
+| `SMTP_HOST` / `SMTP_PORT` | 发信SMTP主机 / `465`；主机留空时无法发送注册验证码 |
+| `SMTP_TLS_MODE` | `tls`（通常465），或 `starttls`（通常587） |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | 发信账号和客户端专用密码/授权码 |
+| `SMTP_FROM` | 发件邮箱，默认同SMTP_USERNAME |
 
 命令默认在项目根目录运行。进程环境变量优先于 `.env`。配置文件支持 `KEY=value`、整行注释、单/双引号包围的字面值，不执行变量替换。
 
@@ -81,12 +86,17 @@ npm run smoke
 
 云服务器建库、授权和建表见 [MySQL建表步骤](docs/云服务器MySQL建表.md)。
 
+暂不使用域名时，按 [云服务器IP访问](docs/云服务器IP访问.md) 构建并开放HTTP测试访问。
+
+校园邮箱允许后缀、南大邮箱SMTP开通及配置步骤见 [校园邮箱与SMTP配置](docs/校园邮箱与SMTP配置.md)。验证码60秒有效，注册成功后单次消耗，邮箱不能重复绑定。
+
 ## 分层结构
 
 ```text
 client/                         Vue + TypeScript 页面、组件、样式
 server/cmd/server/              启动入口、依赖组装、优雅退出
 server/internal/config/         环境配置与校验
+server/internal/mailer/         使用TLS/STARTTLS认证的SMTP验证码发信
 server/internal/model/          业务模型与接口数据类型
 server/internal/httpapi/        路由、JSON、Cookie、上传及 HTTP 测试
 server/internal/service/        业务校验、权限、认证、流程和事件
