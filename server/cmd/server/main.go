@@ -59,12 +59,17 @@ func run() error {
 	hub := realtime.New()
 	defer hub.Close()
 	var sender service.VerificationMailer
+	var feedbackSender service.FeedbackMailer
 	if cfg.SMTPHost != "" {
-		sender = mailer.NewSMTP(cfg)
+		smtp := mailer.NewSMTP(cfg)
+		sender = smtp
+		feedbackSender = smtp
 	} else {
-		slog.Warn("SMTP not configured; email-code registration is unavailable")
+		slog.Warn("SMTP not configured; email-code registration and footer feedback are unavailable")
 	}
-	app := service.New(repo, service.NewTokens(cfg.JWTSecret), hub, service.WithEmailVerification(cfg.CampusEmailDomain, sender))
+	app := service.New(repo, service.NewTokens(cfg.JWTSecret), hub,
+		service.WithEmailVerification(cfg.CampusEmailDomain, sender),
+		service.WithFeedback(cfg.FeedbackEmail, feedbackSender))
 	server := &http.Server{Addr: cfg.Address, Handler: httpapi.New(app, hub, cfg), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	stopping, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

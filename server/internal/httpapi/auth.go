@@ -109,6 +109,7 @@ func (a *API) routes() {
 		return nil
 	})
 	a.handle("POST /api/uploads", "user", a.upload)
+	a.handle("POST /api/feedback", "", a.feedback)
 	a.exchangeRoutes()
 	a.mateRoutes()
 	a.messageRoutes()

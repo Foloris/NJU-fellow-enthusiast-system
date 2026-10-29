@@ -33,6 +33,7 @@ type Config struct {
 	SMTPPassword      string
 	SMTPFrom          string
 	SMTPTLSMode       string
+	FeedbackEmail     string
 }
 
 // LoadEnv supports KEY=value, comments and quoted values. Process variables take precedence.
@@ -83,6 +84,7 @@ func Load() (Config, error) {
 		SMTPHost:          strings.TrimSpace(os.Getenv("SMTP_HOST")), SMTPPort: env("SMTP_PORT", "465"),
 		SMTPUsername: os.Getenv("SMTP_USERNAME"), SMTPPassword: os.Getenv("SMTP_PASSWORD"),
 		SMTPFrom: strings.TrimSpace(os.Getenv("SMTP_FROM")), SMTPTLSMode: env("SMTP_TLS_MODE", "tls"),
+		FeedbackEmail: strings.ToLower(strings.TrimSpace(env("FEEDBACK_EMAIL", "feedback@example.com"))),
 	}
 	if len(c.JWTSecret) < 32 || c.JWTSecret == "replace-this-with-a-long-random-string" {
 		return c, errors.New("JWT_SECRET must be a non-placeholder secret of at least 32 bytes")
@@ -98,6 +100,12 @@ func Load() (Config, error) {
 	}
 	if err := c.validateEmail(); err != nil {
 		return c, err
+	}
+	if c.FeedbackEmail != "" {
+		address, err := mail.ParseAddress(c.FeedbackEmail)
+		if err != nil || address.Address != c.FeedbackEmail || strings.ContainsAny(c.FeedbackEmail, "\r\n\t ") {
+			return c, errors.New("FEEDBACK_EMAIL must be a valid mailbox")
+		}
 	}
 	for _, p := range []*string{&c.UploadDir, &c.ClientDir} {
 		absolute, err := filepath.Abs(*p)
